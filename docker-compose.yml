@@ -1,0 +1,36 @@
+services:
+  node1:
+    image: ubuntu:22.04
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node1
+    volumes:
+      -
+
+  node2:
+    image: ubuntu:22.04
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node2
+    volumes:
+      -
+
+  node3:
+    image: ubuntu:22.04
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node3
+    volumes:
+      -
+
+  node4:
+    image: ubuntu:22.04
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: node4
+    volumes:
+      -
