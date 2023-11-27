@@ -1,36 +1,41 @@
+version: "3"
 services:
   node1:
     image: ubuntu:22.04
     build:
       context: .
+      args:
+        - tmp=node1
       dockerfile: Dockerfile
     container_name: node1
-    volumes:
-      -
+    tty: true
 
   node2:
     image: ubuntu:22.04
     build:
       context: .
+      args:
+        - tmp=node2
       dockerfile: Dockerfile
     container_name: node2
-    volumes:
-      -
+    tty: true
 
   node3:
     image: ubuntu:22.04
     build:
       context: .
+      args:
+        - tmp=node3
       dockerfile: Dockerfile
     container_name: node3
-    volumes:
-      -
+    tty: true
 
   node4:
     image: ubuntu:22.04
     build:
       context: .
+      args:
+        - tmp=node4
       dockerfile: Dockerfile
     container_name: node4
-    volumes:
-      -
+    tty: true
