@@ -2,13 +2,12 @@ FROM ubuntu:22.04
 
 LABEL maintainer="Oh Hong Seok <lkl4502@kookmin.ac.kr>"
 
-
 ARG DEBIAN_FRONTEND=noninteractive
 ARG SSH_USER=${SSH_USER:-ubuntu}
 ARG SSH_PASSWORD=${SSH_PASSWORD:-ubuntu}
 ARG SOURCE=https://github.com/Yelp/dumb-init/releases/download
 ENV TZ=Asia/Seoul;
-ADD $SOURCE/v1.2.5/dumb-init_1.2.5_amd64.deb /tmp/
+ADD $SOURCE/v1.2.5/dumb-init_1.2.5_arm64.deb /tmp/
 RUN echo $TZ > /etc/timezone
 
 RUN sed -i "s#/archive.ubuntu.com/#/mirror.kakao.com/#g" /etc/apt/sources.list
@@ -19,9 +18,9 @@ openssh-server \
 aptitude sudo vim curl \
 net-tools iputils-ping traceroute netcat \
 telnet dnsutils \
-&& apt install /tmp/dumb-init_1.2.5_amd64.deb \
-&& mkdir /var/run/ssh \
-&& apt-get clean \
+&& apt install /tmp/dumb-init_1.2.5_arm64.deb \
+&& mkdir /var/run/sshd \
+&& apt clean \
 && rm -rf /var/lib/apt/lists* /tmp/* /var/tmp*
 
 USER root
@@ -43,25 +42,3 @@ RUN useradd -c "System Administrator" -m -d /home/$SSH_USER \
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]
-
-
-
-ARG tmp
-RUN echo "$tmp"
-# RUN apt update && apt install -qq -y \
-# gcc \
-# ssh \
-# openssh-server \
-# openssh-client \
-# vim \
-# sudo \
-# && mkdir /var/run/sshd \
-# && apt clean \
-# && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# RUN sed -ri 's/^#?PermitRootLogin\s+.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-# RUN sed -ri 's/UsePAM yes/#UsePAM yes/g' /etc/ssh/sshd_config
-
-# EXPOSE 22
-
-# CMD ["/usr/sbin/sshd", "-D"]
