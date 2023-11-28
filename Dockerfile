@@ -15,6 +15,7 @@ RUN sed -i "s#/archive.ubuntu.com/#/mirror.kakao.com/#g" /etc/apt/sources.list
 RUN apt update \
 && apt install -qq -y \
 openssh-server \
+sshpass gcc \
 aptitude sudo vim curl \
 net-tools iputils-ping traceroute netcat \
 telnet dnsutils \
