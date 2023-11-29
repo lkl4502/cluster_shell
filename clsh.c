@@ -118,9 +118,21 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    // -b 옵션 확인
+    bool redirection_flag = false;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "-b"))
+            redirection_flag = true;
+
+    // -b 옵션시에 명령어 추출 위치 변경
+    int start = 0;
+    if (redirection_flag) {
+        start = 1;
+    }
+
     if (!strcmp(argv[1], "-h")) { // -h옵션
         input_node_num = split(argv[2], input_node, ",");
-        command_len = extract_command(argv, command, 3, argc);
+        command_len = extract_command(argv, command, start + 3, argc);
 
     } else if (!strcmp(argv[1], "--hostfile")) { // --hostfile 옵션
         int hostfile_fd;
@@ -140,7 +152,8 @@ int main(int argc, char *argv[]) {
         close(hostfile_fd);
 
         input_node_num = split(buf, input_node, "\n");
-        command_len = extract_command(argv, command, 3, argc);
+        memset(buf, 0, sizeof(buf));
+        command_len = extract_command(argv, command, start + 3, argc);
 
     } else { // --hostfile 생략
         char *val;
@@ -148,7 +161,7 @@ int main(int argc, char *argv[]) {
         int hostfile_fd;
         if ((val = getenv("CLSH_HOSTS")) != NULL) { // CLSH_HOSTS 환경변수
             input_node_num = split(val, input_node, ":");
-            command_len = extract_command(argv, command, 1, argc);
+            command_len = extract_command(argv, command, start + 1, argc);
             sprintf(explanation, "Note: use CLSH_HOSTS environment\n");
         } else if ((val = getenv("CLSH_HOSTFILE")) != NULL) {
             // CLSH_HOSTFILE 환경 변수
@@ -165,7 +178,8 @@ int main(int argc, char *argv[]) {
             close(hostfile_fd);
 
             input_node_num = split(buf, input_node, "\n");
-            command_len = extract_command(argv, command, 1, argc);
+            memset(buf, 0, sizeof(buf));
+            command_len = extract_command(argv, command, start + 1, argc);
             sprintf(explanation,
                     "Note: use hostfile \'%s\' (CLSH_HOSTFILE env)\n", val);
         } else if ((hostfile_fd = open(".hostfile", O_RDONLY)) != -1) {
@@ -178,7 +192,8 @@ int main(int argc, char *argv[]) {
             close(hostfile_fd);
 
             input_node_num = split(buf, input_node, "\n");
-            command_len = extract_command(argv, command, 1, argc);
+            memset(buf, 0, sizeof(buf));
+            command_len = extract_command(argv, command, start + 1, argc);
             sprintf(val, "Note: use hostfile \'%s\' (default)\n", val);
         } else { // 모두 없을 때
             sprintf(explanation, "--hostfile 옵션이 제공되지 않았습니다.\n");
@@ -186,6 +201,28 @@ int main(int argc, char *argv[]) {
             return 0;
         }
         printf("%s", explanation);
+    }
+
+    if (redirection_flag) {
+        char pipe_input[MSGSIZE] = {0};
+        char *tmp;
+        int idx = 0;
+        while (1) {
+            tmp = fgets(&pipe_input[idx], MSGSIZE, stdin);
+            if (tmp == NULL)
+                break;
+            idx += strlen(tmp);
+            pipe_input[idx - 1] = ' ';
+        }
+
+        command[command_len - 1] = ' ';
+        for (int i = 0; i < 3; i++)
+            command[command_len++] = '<';
+        command[command_len++] = ' ';
+
+        for (int i = 0; i < idx; i++)
+            command[command_len++] = pipe_input[i];
+        command[command_len++] = '\n';
     }
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
@@ -216,7 +253,7 @@ int main(int argc, char *argv[]) {
                 break;
 
             default:
-                printf("%s: %s", node_name[node], buf);
+                printf("%s: %s\n", node_name[node], buf);
                 memset(buf, 0, n);
                 check_response[node] = true;
                 break;
