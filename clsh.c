@@ -150,8 +150,8 @@ int main(int argc, char *argv[]) {
             input_node_num = split(val, input_node, ":");
             command_len = extract_command(argv, command, 1, argc);
             sprintf(explanation, "Note: use CLSH_HOSTS environment\n");
-            // CLSH_HOSTFILE 환경 변수
         } else if ((val = getenv("CLSH_HOSTFILE")) != NULL) {
+            // CLSH_HOSTFILE 환경 변수
             if ((hostfile_fd = open(val, O_RDONLY)) == -1) {
                 perror("Open");
                 exit(1);
@@ -169,7 +169,7 @@ int main(int argc, char *argv[]) {
             sprintf(explanation,
                     "Note: use hostfile \'%s\' (CLSH_HOSTFILE env)\n", val);
         } else if ((hostfile_fd = open(".hostfile", O_RDONLY)) != -1) {
-
+            // .hostfile
             if ((n = read(hostfile_fd, buf, MSGSIZE)) == -1) {
                 perror("Read");
                 exit(1);
@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
             input_node_num = split(buf, input_node, "\n");
             command_len = extract_command(argv, command, 1, argc);
             sprintf(val, "Note: use hostfile \'%s\' (default)\n", val);
-        } else {
+        } else { // 모두 없을 때
             sprintf(explanation, "--hostfile 옵션이 제공되지 않았습니다.\n");
             printf("%s", explanation);
             return 0;
