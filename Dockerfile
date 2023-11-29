@@ -40,6 +40,8 @@ RUN useradd -c "System Administrator" -m -d /home/$SSH_USER \
 && echo "$SSH_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers \
 && echo "$SSH_USER:$SSH_PASSWORD" | chpasswd
 
+RUN echo "export PATH=/build:$PATH" >> ~/.bashrc
+
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 EXPOSE 22
 CMD ["/usr/sbin/sshd", "-D"]

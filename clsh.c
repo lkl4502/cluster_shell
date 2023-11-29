@@ -113,21 +113,33 @@ int main(int argc, char *argv[]) {
     int input_node_num;
     int n;
 
+    if (argc == 1) {
+        perror("인자 부족");
+        return 0;
+    }
+
+    // clsh -h node1,node2,node3,node4 cat /proc/loadavg
     if (!strcmp(argv[1], "-h")) {
         input_node_num = split(argv[2], input_node, ",");
         command_len = extract_command(argv, command, 3, argc);
 
+        // clsh --hostfile ./hostfile cat /proc/loadavg
     } else if (!strcmp(argv[1], "--hostfile")) {
         int hostfile_fd;
-        if ((hostfile_fd = open(argv[2], O_RDONLY)) == -1) {
-            perror("open");
+
+        char absolute_path[260] = {0};
+        realpath(argv[2], absolute_path);
+        if ((hostfile_fd = open(absolute_path, O_RDONLY)) == -1) {
+            perror("Open");
             exit(1);
         }
 
         if ((n = read(hostfile_fd, buf, MSGSIZE)) == -1) {
-            perror("read");
+            perror("Read");
             exit(1);
         }
+
+        close(hostfile_fd);
 
         input_node_num = split(buf, input_node, "\n");
         command_len = extract_command(argv, command, 3, argc);
@@ -178,5 +190,3 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
-
-// clsh -h node1,node2,node3,node4 cat /proc/loadavg
