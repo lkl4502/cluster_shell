@@ -111,12 +111,26 @@ int main(int argc, char *argv[]) {
     char command[MSGSIZE] = {0};
     int command_len;
     int input_node_num;
+    int n;
 
     if (!strcmp(argv[1], "-h")) {
         input_node_num = split(argv[2], input_node, ",");
         command_len = extract_command(argv, command, 3, argc);
 
     } else if (!strcmp(argv[1], "--hostfile")) {
+        int hostfile_fd;
+        if ((hostfile_fd = open(argv[2], O_RDONLY)) == -1) {
+            perror("open");
+            exit(1);
+        }
+
+        if ((n = read(hostfile_fd, buf, MSGSIZE)) == -1) {
+            perror("read");
+            exit(1);
+        }
+
+        input_node_num = split(buf, input_node, "\n");
+        command_len = extract_command(argv, command, 3, argc);
     }
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
@@ -131,7 +145,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    int n;
     while (1) {
         for (int node = 0; node < TOTAL_NODE; node++) {
             if (check_response[node])
