@@ -31,6 +31,16 @@ int extract_command(char *input[MAXWORD], char result[], int start, int end) {
     return idx;
 }
 
+char *concat(char strto[], const char strfrom[], char newstr[]) {
+    int tlen;
+    for (tlen = 0; strto[tlen] != '\0'; tlen++)
+        newstr[tlen] = strto[tlen];
+    for (int i = 0; strfrom[i] != '\0'; i++, tlen++)
+        newstr[tlen] = strfrom[i];
+    newstr[tlen] = '\0';
+    return newstr;
+}
+
 int main(int argc, char *argv[]) {
     char buf[MSGSIZE] = {0};
     pid_t pid_arr[TOTAL_NODE];
@@ -62,6 +72,11 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
 
+        if (fcntl(fd_to_err[node][0], F_SETFL, O_NONBLOCK) == -1) {
+            perror("fcntl");
+            exit(1);
+        }
+
         switch (pid_arr[node] = fork()) {
         case -1:
             perror("fork");
@@ -73,11 +88,15 @@ int main(int argc, char *argv[]) {
             close(fd_to_err[node][0]);
 
             dup2(fd_to_child[node][0], STDIN_FILENO);
+            close(fd_to_child[node][0]);
             dup2(fd_to_parent[node][1], STDOUT_FILENO);
+            close(fd_to_parent[node][1]);
             dup2(fd_to_err[node][1], STDERR_FILENO);
+            close(fd_to_err[node][1]);
 
             setvbuf(stdin, NULL, _IOLBF, 0);
             setvbuf(stdout, NULL, _IOLBF, 0);
+            setvbuf(stderr, NULL, _IOLBF, 0);
 
             char *ssh_argv[] = {"sshpass",
                                 "-p",
@@ -118,17 +137,35 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // -b 옵션 확인
+    // 옵션 확인
     bool redirection_flag = false;
-    for (int i = 1; i < argc; i++)
-        if (!strcmp(argv[i], "-b"))
+    char *out_file;
+    char *err_file;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-b")) {
             redirection_flag = true;
-
-    // -b 옵션시에 명령어 추출 위치 변경
-    int start = 0;
-    if (redirection_flag) {
-        start = 1;
+            continue;
+        }
+        if (strstr(argv[i], "--out=") != NULL) {
+            out_file = strstr(argv[i], "--out=") + strlen("--out=");
+            continue;
+        }
+        if (strstr(argv[i], "--err=") != NULL) {
+            err_file = strstr(argv[i], "--err=") + strlen("--err=");
+            continue;
+        }
     }
+
+    // 옵션에 따른 명령어 추출 위치 변경
+    int start = 0;
+    if (redirection_flag)
+        start += 1;
+
+    if (out_file != NULL)
+        start += 1;
+
+    if (err_file != NULL)
+        start += 1;
 
     if (!strcmp(argv[1], "-h")) { // -h옵션
         input_node_num = split(argv[2], input_node, ",");
@@ -227,6 +264,7 @@ int main(int argc, char *argv[]) {
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
 
+    // node로 명령 전달
     for (int i = 0; i < input_node_num; i++) {
         for (int node = 0; node < TOTAL_NODE; node++) {
             if (!strcmp(input_node[i], node_name[node])) {
@@ -244,16 +282,60 @@ int main(int argc, char *argv[]) {
 
             switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
             case -1:
-                if (errno != EAGAIN)
-                    perror("read");
-                break;
+                if (errno == EINTR)
+                    break;
+                else if (errno == EAGAIN) {
+                    printf("%d\n", errno);
+                    break;
+                } else {
+                    perror("Read");
+                    exit(1);
+                }
 
             case 0:
+                check_response[node] = true;
                 perror("EOF");
                 break;
 
             default:
-                printf("%s: %s\n", node_name[node], buf);
+                if (err_file != NULL) {
+                    char err_buf[MSGSIZE] = {0};
+                    char file_name[MSGSIZE] = {0};
+
+                    concat(err_file, node_name[node], file_name);
+                    concat(file_name, ".err", file_name);
+
+                    int err_fd =
+                        open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (err_fd == -1) {
+                        perror("Open");
+                        exit(1);
+                    }
+
+                    int err_n = read(fd_to_err[node][0], err_buf, MSGSIZE);
+
+                    write(err_fd, err_buf, err_n);
+                    close(err_fd);
+                }
+
+                if (out_file != NULL) {
+                    char file_name[MSGSIZE] = {0};
+
+                    concat(out_file, node_name[node], file_name);
+                    concat(file_name, ".out", file_name);
+
+                    int out_fd =
+                        open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (out_fd == -1) {
+                        perror("Open");
+                        exit(1);
+                    }
+
+                    write(out_fd, buf, n);
+                    close(out_fd);
+                } else
+                    printf("%s: %s\n", node_name[node], buf);
+
                 memset(buf, 0, n);
                 check_response[node] = true;
                 break;
