@@ -10,6 +10,16 @@
 #define MAXWORD 20
 #define TOTAL_NODE 4
 
+pid_t pid_arr[TOTAL_NODE];
+char *node_name[TOTAL_NODE] = {"node1", "node2", "node3", "node4"};
+
+int fd_to_child[TOTAL_NODE][2];
+int fd_to_parent[TOTAL_NODE][2];
+int fd_to_err[TOTAL_NODE][2];
+
+char input_node[MAXWORD][MSGSIZE] = {0};
+int input_node_num;
+
 int split(char input[], char result[][MSGSIZE], const char *delimiter) {
     int word_cnt = 0;
     char *ptr = strtok(input, delimiter);
@@ -41,95 +51,95 @@ char *concat(char strto[], const char strfrom[], char newstr[]) {
     return newstr;
 }
 
-int main(int argc, char *argv[]) {
-    char buf[MSGSIZE] = {0};
-    pid_t pid_arr[TOTAL_NODE];
+bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
+    for (int i = 0; i < input_node_num; i++) {
+        for (int node = 0; node < TOTAL_NODE; node++) {
+            if (!strcmp(input_node[i], node_name[node])) {
+                check_response[node] = false;
+                if (pipe(fd_to_parent[node]) == -1) {
+                    perror("pipe parent");
+                    exit(1);
+                }
 
-    int fd_to_child[TOTAL_NODE][2];
-    int fd_to_parent[TOTAL_NODE][2];
-    int fd_to_err[TOTAL_NODE][2];
+                if (pipe(fd_to_child[node]) == -1) {
+                    perror("pipe child");
+                    exit(1);
+                }
 
-    char *node_name[TOTAL_NODE] = {"node1", "node2", "node3", "node4"};
+                if (pipe(fd_to_err[node]) == -1) {
+                    perror("pipe err");
+                    exit(1);
+                }
 
-    for (int node = 0; node < TOTAL_NODE; node++) {
-        if (pipe(fd_to_parent[node]) == -1) {
-            perror("pipe parent");
-            exit(1);
-        }
+                if (fcntl(fd_to_parent[node][0], F_SETFL, O_NONBLOCK) == -1) {
+                    perror("fcntl");
+                    exit(1);
+                }
 
-        if (pipe(fd_to_child[node]) == -1) {
-            perror("pipe child");
-            exit(1);
-        }
+                if (fcntl(fd_to_err[node][0], F_SETFL, O_NONBLOCK) == -1) {
+                    perror("fcntl");
+                    exit(1);
+                }
 
-        if (pipe(fd_to_err[node]) == -1) {
-            perror("pipe err");
-            exit(1);
-        }
+                switch (pid_arr[node] = fork()) {
+                case -1:
+                    perror("fork");
+                    exit(1);
+                    break;
+                case 0: // child
+                    close(fd_to_child[node][1]);
+                    close(fd_to_parent[node][0]);
+                    close(fd_to_err[node][0]);
 
-        if (fcntl(fd_to_parent[node][0], F_SETFL, O_NONBLOCK) == -1) {
-            perror("fcntl");
-            exit(1);
-        }
+                    dup2(fd_to_child[node][0], STDIN_FILENO);
+                    close(fd_to_child[node][0]);
+                    dup2(fd_to_parent[node][1], STDOUT_FILENO);
+                    close(fd_to_parent[node][1]);
+                    dup2(fd_to_err[node][1], STDERR_FILENO);
+                    close(fd_to_err[node][1]);
 
-        if (fcntl(fd_to_err[node][0], F_SETFL, O_NONBLOCK) == -1) {
-            perror("fcntl");
-            exit(1);
-        }
+                    setvbuf(stdin, NULL, _IOLBF, 0);
+                    setvbuf(stdout, NULL, _IOLBF, 0);
+                    setvbuf(stderr, NULL, _IOLBF, 0);
 
-        switch (pid_arr[node] = fork()) {
-        case -1:
-            perror("fork");
-            exit(1);
-            break;
-        case 0: // child
-            close(fd_to_child[node][1]);
-            close(fd_to_parent[node][0]);
-            close(fd_to_err[node][0]);
+                    char *ssh_argv[] = {"sshpass",
+                                        "-p",
+                                        "ubuntu",
+                                        "ssh",
+                                        node_name[node],
+                                        "-T",
+                                        "-o",
+                                        "StrictHostKeyChecking=no",
+                                        "-l",
+                                        "ubuntu",
+                                        command,
+                                        NULL};
+                    if (execv("/bin/sshpass", ssh_argv) == -1) {
+                        perror("execv");
+                        exit(1);
+                    }
+                    break;
 
-            dup2(fd_to_child[node][0], STDIN_FILENO);
-            close(fd_to_child[node][0]);
-            dup2(fd_to_parent[node][1], STDOUT_FILENO);
-            close(fd_to_parent[node][1]);
-            dup2(fd_to_err[node][1], STDERR_FILENO);
-            close(fd_to_err[node][1]);
+                default: // parent
+                    close(fd_to_child[node][0]);
+                    close(fd_to_parent[node][1]);
+                    close(fd_to_err[node][1]);
 
-            setvbuf(stdin, NULL, _IOLBF, 0);
-            setvbuf(stdout, NULL, _IOLBF, 0);
-            setvbuf(stderr, NULL, _IOLBF, 0);
-
-            char *ssh_argv[] = {"sshpass",
-                                "-p",
-                                "ubuntu",
-                                "ssh",
-                                node_name[node],
-                                "-T",
-                                "-o",
-                                "StrictHostKeyChecking=no",
-                                "-l",
-                                "ubuntu",
-                                NULL};
-            if (execv("/bin/sshpass", ssh_argv) == -1) {
-                perror("execv");
-                exit(1);
+                    setvbuf(stdin, NULL, _IOLBF, 0);
+                    setvbuf(stdout, NULL, _IOLBF, 0);
+                    break;
+                }
+                break;
             }
-            break;
-
-        default: // parent
-            close(fd_to_child[node][0]);
-            close(fd_to_parent[node][1]);
-            close(fd_to_err[node][1]);
-
-            setvbuf(stdin, NULL, _IOLBF, 0);
-            setvbuf(stdout, NULL, _IOLBF, 0);
-            break;
         }
     }
+}
 
-    char input_node[MAXWORD][MSGSIZE] = {0};
+int main(int argc, char *argv[]) {
+    char buf[MSGSIZE] = {0};
+
     char command[MSGSIZE] = {0};
     int command_len;
-    int input_node_num;
     int n;
 
     if (argc == 1) {
@@ -264,16 +274,7 @@ int main(int argc, char *argv[]) {
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
 
-    // node로 명령 전달
-    for (int i = 0; i < input_node_num; i++) {
-        for (int node = 0; node < TOTAL_NODE; node++) {
-            if (!strcmp(input_node[i], node_name[node])) {
-                check_response[node] = false;
-                write(fd_to_child[node][1], command, command_len);
-                break;
-            }
-        }
-    }
+    ssh_connect(command, check_response);
 
     while (1) {
         for (int node = 0; node < TOTAL_NODE; node++) {
@@ -282,10 +283,8 @@ int main(int argc, char *argv[]) {
 
             switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
             case -1:
-                if (errno == EINTR)
-                    break;
-                else if (errno == EAGAIN) {
-                    printf("%d\n", errno);
+                if (errno == EINTR || errno == EAGAIN) {
+                    sleep(1);
                     break;
                 } else {
                     perror("Read");
@@ -293,8 +292,8 @@ int main(int argc, char *argv[]) {
                 }
 
             case 0:
+                printf("%s: 출력문 없음.\n", node_name[node]);
                 check_response[node] = true;
-                perror("EOF");
                 break;
 
             default:
