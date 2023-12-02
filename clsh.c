@@ -250,6 +250,16 @@ int main(int argc, char *argv[]) {
         printf("%s", explanation);
     }
 
+    if (!strcmp(command, "-i")) { // Interactive Mode 구현
+        printf("Enter 'quit' to leave this interactive mode\n");
+        printf("Working with nodes : ");
+        for (int i = 0; i < input_node_num; i++)
+            if (i == input_node_num - 1)
+                printf("%s\n", input_node[i]);
+            else
+                printf("%s, ", input_node[i]);
+    }
+
     if (redirection_flag) {
         char pipe_input[MSGSIZE] = {0};
         char *tmp;
@@ -273,7 +283,6 @@ int main(int argc, char *argv[]) {
     }
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
-
     ssh_connect(command, check_response);
 
     while (1) {
@@ -283,6 +292,29 @@ int main(int argc, char *argv[]) {
 
             switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
             case -1:
+                if (err_file != NULL) {
+                    char err_buf[MSGSIZE] = {0};
+                    char file_name[MSGSIZE] = {0};
+
+                    int err_n = read(fd_to_err[node][0], err_buf, MSGSIZE);
+                    if (err_n > 0) {
+                        concat(err_file, node_name[node], file_name);
+                        concat(file_name, ".err", file_name);
+
+                        int err_fd =
+                            open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (err_fd == -1) {
+                            perror("Open");
+                            exit(1);
+                        }
+
+                        write(err_fd, err_buf, err_n);
+                        close(err_fd);
+
+                        check_response[node] = true;
+                        break;
+                    }
+                }
                 if (errno == EINTR || errno == EAGAIN) {
                     sleep(1);
                     break;
@@ -297,26 +329,6 @@ int main(int argc, char *argv[]) {
                 break;
 
             default:
-                if (err_file != NULL) {
-                    char err_buf[MSGSIZE] = {0};
-                    char file_name[MSGSIZE] = {0};
-
-                    concat(err_file, node_name[node], file_name);
-                    concat(file_name, ".err", file_name);
-
-                    int err_fd =
-                        open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                    if (err_fd == -1) {
-                        perror("Open");
-                        exit(1);
-                    }
-
-                    int err_n = read(fd_to_err[node][0], err_buf, MSGSIZE);
-
-                    write(err_fd, err_buf, err_n);
-                    close(err_fd);
-                }
-
                 if (out_file != NULL) {
                     char file_name[MSGSIZE] = {0};
 
