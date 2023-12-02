@@ -149,8 +149,9 @@ int main(int argc, char *argv[]) {
 
     // 옵션 확인
     bool redirection_flag = false;
-    char *out_file;
-    char *err_file;
+    char *out_file = NULL;
+    char *err_file = NULL;
+
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-b")) {
             redirection_flag = true;
@@ -168,6 +169,7 @@ int main(int argc, char *argv[]) {
 
     // 옵션에 따른 명령어 추출 위치 변경
     int start = 0;
+
     if (redirection_flag)
         start += 1;
 
@@ -250,7 +252,7 @@ int main(int argc, char *argv[]) {
         printf("%s", explanation);
     }
 
-    if (!strcmp(command, "-i")) { // Interactive Mode 구현
+    if (!strcmp(command, "-i\n")) { // Interactive Mode 구현
         printf("Enter 'quit' to leave this interactive mode\n");
         printf("Working with nodes : ");
         for (int i = 0; i < input_node_num; i++)
@@ -258,6 +260,84 @@ int main(int argc, char *argv[]) {
                 printf("%s\n", input_node[i]);
             else
                 printf("%s, ", input_node[i]);
+
+        bool check_response[TOTAL_NODE] = {true, true, true, true};
+        ssh_connect("", check_response);
+
+        while (1) { // 명령어 입력
+            printf("clsh> ");
+            char interactive_buf[MSGSIZE] = {0};
+            fgets(interactive_buf, MSGSIZE, stdin);
+
+            if (!strcmp(interactive_buf, "quit\n")) { // 종료
+                printf("Interactive Mode Exit\n");
+                break;
+            }
+
+            if (interactive_buf[0] == '!') { // 로컬 실행
+                printf("LOCAL : ");
+                int res = system(interactive_buf);
+                if (res == -1) {
+                    perror("System");
+                    exit(1);
+                }
+                continue;
+            }
+
+            for (int i = 0; i < input_node_num; i++) {
+                for (int node = 0; node < TOTAL_NODE; node++) {
+                    if (!strcmp(input_node[i], node_name[node])) {
+                        check_response[node] = false;
+                        write(fd_to_child[node][1], interactive_buf,
+                              strlen(interactive_buf));
+                        break;
+                    }
+                }
+            }
+
+            printf("-------------------\n");
+
+            memset(interactive_buf, 0, MSGSIZE);
+            while (1) {
+                for (int node = 0; node < TOTAL_NODE; node++) {
+                    if (check_response[node])
+                        continue;
+
+                    switch (n = read(fd_to_parent[node][0], interactive_buf,
+                                     MSGSIZE)) {
+                    case -1:
+                        if (errno == EINTR || errno == EAGAIN) {
+                            sleep(1);
+                            break;
+                        } else {
+                            perror("Read");
+                            exit(1);
+                        }
+
+                    case 0:
+                        printf("%s: 출력문 없음.\n", node_name[node]);
+                        check_response[node] = true;
+                        break;
+
+                    default:
+                        printf("%s: \n%s \n", node_name[node], interactive_buf);
+                        memset(interactive_buf, 0, n);
+                        check_response[node] = true;
+                        break;
+                    }
+                }
+
+                bool flag = true;
+                for (int i = 0; i < TOTAL_NODE; i++)
+                    if (!check_response[i])
+                        flag = false;
+                if (flag)
+                    break;
+            }
+
+            printf("-------------------\n");
+        }
+        return 0;
     }
 
     if (redirection_flag) {
@@ -295,7 +375,6 @@ int main(int argc, char *argv[]) {
                 if (err_file != NULL) {
                     char err_buf[MSGSIZE] = {0};
                     char file_name[MSGSIZE] = {0};
-
                     int err_n = read(fd_to_err[node][0], err_buf, MSGSIZE);
                     if (err_n > 0) {
                         concat(err_file, node_name[node], file_name);
@@ -345,7 +424,7 @@ int main(int argc, char *argv[]) {
                     write(out_fd, buf, n);
                     close(out_fd);
                 } else
-                    printf("%s: %s\n", node_name[node], buf);
+                    printf("%s: \n%s\n", node_name[node], buf);
 
                 memset(buf, 0, n);
                 check_response[node] = true;
