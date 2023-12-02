@@ -275,8 +275,9 @@ int main(int argc, char *argv[]) {
             }
 
             if (interactive_buf[0] == '!') { // 로컬 실행
-                printf("LOCAL : ");
-                int res = system(interactive_buf);
+                fprintf(stderr, "LOCAL : ");
+
+                int res = system(interactive_buf + 1);
                 if (res == -1) {
                     perror("System");
                     exit(1);
@@ -298,6 +299,7 @@ int main(int argc, char *argv[]) {
             printf("-------------------\n");
 
             memset(interactive_buf, 0, MSGSIZE);
+            int sleep_cnt = 0;
             while (1) {
                 for (int node = 0; node < TOTAL_NODE; node++) {
                     if (check_response[node])
@@ -308,6 +310,7 @@ int main(int argc, char *argv[]) {
                     case -1:
                         if (errno == EINTR || errno == EAGAIN) {
                             sleep(1);
+                            sleep_cnt++;
                             break;
                         } else {
                             perror("Read");
@@ -333,6 +336,13 @@ int main(int argc, char *argv[]) {
                         flag = false;
                 if (flag)
                     break;
+
+                if (sleep_cnt == 10) {
+                    for (int node = 0; node < TOTAL_NODE; node++)
+                        if (!check_response[node])
+                            printf("%s: 출력문 없음.\n", node_name[node]);
+                    break;
+                }
             }
 
             printf("-------------------\n");
