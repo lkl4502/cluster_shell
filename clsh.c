@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,6 +136,12 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
     }
 }
 
+void sigterm_handler(int signo) {}
+
+void sigint_handler(int signo) {}
+
+void sigquit_handler(int signo) {}
+
 int main(int argc, char *argv[]) {
     char buf[MSGSIZE] = {0};
 
@@ -145,6 +152,26 @@ int main(int argc, char *argv[]) {
     if (argc == 1) {
         perror("인자 부족");
         return 0;
+    }
+
+    // SIGTERM -> 하던 일 하고 종료, SIGQUIT -> 바로 종료, SIGINT
+    struct sigaction act;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+
+    if (sigaction(SIGTERM, &act, 0) < 0) {
+        perror("Sigaction sigterm");
+        exit(1);
+    }
+
+    if (sigaction(SIGQUIT, &act, 0) < 0) {
+        perror("Sigaction sigquit");
+        exit(1);
+    }
+
+    if (sigaction(SIGINT, &act, 0) < 0) {
+        perror("Sigaction sigint");
+        exit(1);
     }
 
     // 옵션 확인
@@ -337,7 +364,7 @@ int main(int argc, char *argv[]) {
                 if (flag)
                     break;
 
-                if (sleep_cnt == 10) {
+                if (sleep_cnt > 10) {
                     for (int node = 0; node < TOTAL_NODE; node++)
                         if (!check_response[node])
                             printf("%s: 출력문 없음.\n", node_name[node]);
@@ -373,20 +400,74 @@ int main(int argc, char *argv[]) {
     }
 
     bool check_response[TOTAL_NODE] = {true, true, true, true};
+    bool check_err_response[TOTAL_NODE];
     ssh_connect(command, check_response);
+
+    for (int i = 0; i < TOTAL_NODE; i++)
+        if (!check_response[i])
+            check_err_response[i] = false;
+
+    char err_buf[MSGSIZE] = {0};
+    int err_n;
 
     while (1) {
         for (int node = 0; node < TOTAL_NODE; node++) {
-            if (check_response[node])
-                continue;
+            if (!check_response[node]) {
+                switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
+                case -1:
+                    if (errno == EINTR || errno == EAGAIN) {
+                        sleep(1);
+                        break;
+                    } else {
+                        perror("Read");
+                        exit(1);
+                    }
 
-            switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
-            case -1:
-                if (err_file != NULL) {
-                    char err_buf[MSGSIZE] = {0};
-                    char file_name[MSGSIZE] = {0};
-                    int err_n = read(fd_to_err[node][0], err_buf, MSGSIZE);
-                    if (err_n > 0) {
+                case 0:
+                    check_response[node] = true;
+                    break;
+
+                default:
+                    if (out_file != NULL) {
+                        char file_name[MSGSIZE] = {0};
+
+                        concat(out_file, node_name[node], file_name);
+                        concat(file_name, ".out", file_name);
+
+                        int out_fd =
+                            open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (out_fd == -1) {
+                            perror("Open");
+                            exit(1);
+                        }
+
+                        write(out_fd, buf, n);
+                        close(out_fd);
+                    } else
+                        printf("%s: \n%s", node_name[node], buf);
+
+                    memset(buf, 0, n);
+                    check_response[node] = true;
+                    break;
+                }
+            }
+
+            if (!check_err_response[node]) {
+
+                switch (err_n = read(fd_to_err[node][0], err_buf, MSGSIZE)) {
+                case -1:
+                    if (errno == EINTR || errno == EAGAIN) {
+                        break;
+                    } else {
+                        perror("Err Read");
+                        exit(1);
+                    }
+                case 0:
+                    check_err_response[node] = true;
+                    break;
+                default:
+                    if (err_file != NULL) {
+                        char file_name[MSGSIZE] = {0};
                         concat(err_file, node_name[node], file_name);
                         concat(file_name, ".err", file_name);
 
@@ -399,46 +480,13 @@ int main(int argc, char *argv[]) {
 
                         write(err_fd, err_buf, err_n);
                         close(err_fd);
-
-                        check_response[node] = true;
+                    } else {
+                        printf("%s: \n%s", node_name[node], err_buf);
+                        memset(err_buf, 0, err_n);
                         break;
                     }
+                    check_err_response[node] = true;
                 }
-                if (errno == EINTR || errno == EAGAIN) {
-                    sleep(1);
-                    break;
-                } else {
-                    perror("Read");
-                    exit(1);
-                }
-
-            case 0:
-                printf("%s: 출력문 없음.\n", node_name[node]);
-                check_response[node] = true;
-                break;
-
-            default:
-                if (out_file != NULL) {
-                    char file_name[MSGSIZE] = {0};
-
-                    concat(out_file, node_name[node], file_name);
-                    concat(file_name, ".out", file_name);
-
-                    int out_fd =
-                        open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                    if (out_fd == -1) {
-                        perror("Open");
-                        exit(1);
-                    }
-
-                    write(out_fd, buf, n);
-                    close(out_fd);
-                } else
-                    printf("%s: \n%s\n", node_name[node], buf);
-
-                memset(buf, 0, n);
-                check_response[node] = true;
-                break;
             }
         }
 
