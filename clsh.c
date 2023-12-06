@@ -338,9 +338,15 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (interactive_buf[0] == '!') { // 로컬 실행
-                    fprintf(stderr, "LOCAL : ");
+                    fprintf(stderr, "LOCAL : \n");
+                    int res;
+                    if (!strncmp(interactive_buf + 1, "cd", 2)) {
+                        interactive_buf[strlen(interactive_buf) - 1] = '\0';
+                        char *path = realpath(interactive_buf + 4, NULL);
+                        res = chdir(path);
+                    } else
+                        res = system(interactive_buf + 1);
 
-                    int res = system(interactive_buf + 1);
                     if (res == -1) {
                         perror("System");
                         exit(1);
