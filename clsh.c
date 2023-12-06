@@ -21,6 +21,40 @@ int fd_to_err[TOTAL_NODE][2];
 char input_node[MAXWORD][MSGSIZE] = {0};
 int input_node_num;
 
+// 정상 종료
+void sigterm_handler(int signo) {
+    printf("TERM\n");
+    exit(0);
+}
+
+// ctrl + c
+void sigint_handler(int signo) {
+    printf("INT\n");
+    exit(0);
+}
+
+// ctrl + ;
+void sigquit_handler(int signo) {
+    printf("QUIT\n");
+    if (signo == SIGQUIT)
+        for (int node = 0; node < TOTAL_NODE; node++)
+            kill(pid_arr[node], SIGQUIT);
+
+    exit(0);
+}
+
+// ctrl + z
+void sigtstp_handler(int signo) {
+    printf("TSTP\n");
+    exit(0);
+}
+
+void cleanup() {
+    for (int i = 0; i < TOTAL_NODE; i++) {
+        kill(pid_arr[i], SIGTERM);
+    }
+}
+
 int split(char input[], char result[][MSGSIZE], const char *delimiter) {
     int word_cnt = 0;
     char *ptr = strtok(input, delimiter);
@@ -145,6 +179,38 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
 
                     setvbuf(stdin, NULL, _IOLBF, 0);
                     setvbuf(stdout, NULL, _IOLBF, 0);
+
+                    // SIGTERM -> 하던 일 하고 종료, SIGQUIT -> 바로 종료,
+                    // SIGINT
+                    struct sigaction act;
+                    sigemptyset(&act.sa_mask);
+                    act.sa_flags = 0;
+                    act.sa_handler = sigterm_handler;
+                    if (sigaction(SIGTERM, &act, 0) < 0) {
+                        perror("Sigaction sigterm");
+                        exit(1);
+                    }
+                    act.sa_handler = sigquit_handler;
+                    if (sigaction(SIGQUIT, &act, 0) < 0) {
+                        perror("Sigaction sigquit");
+                        exit(1);
+                    }
+                    act.sa_handler = sigint_handler;
+                    if (sigaction(SIGINT, &act, 0) < 0) {
+                        perror("Sigaction sigint");
+                        exit(1);
+                    }
+
+                    act.sa_handler = sigtstp_handler;
+                    if (sigaction(SIGTSTP, &act, 0) < 0) {
+                        perror("Sigaction sigtstp");
+                        exit(1);
+                    }
+
+                    if (atexit(cleanup) == -1) {
+                        perror("atexit");
+                        exit(1);
+                    }
                     break;
                 }
                 break;
@@ -152,20 +218,6 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
         }
     }
 }
-
-void sigterm_handler(int signo) {}
-
-void sigint_handler(int signo) {}
-
-void sigquit_handler(int signo) {
-    if (signo == SIGQUIT)
-        for (int node = 0; node < TOTAL_NODE; node++)
-            kill(pid_arr[node], SIGQUIT);
-
-    exit(0);
-}
-
-void sigttin_handler(int signo) {}
 
 int main(int argc, char *argv[]) {
     char buf[MSGSIZE] = {0};
@@ -178,26 +230,6 @@ int main(int argc, char *argv[]) {
         perror("인자 부족");
         return 0;
     }
-
-    // SIGTERM -> 하던 일 하고 종료, SIGQUIT -> 바로 종료, SIGINT
-    // struct sigaction act;
-    // sigemptyset(&act.sa_mask);
-    // act.sa_flags = 0;
-
-    // if (sigaction(SIGTERM, &act, 0) < 0) {
-    //     perror("Sigaction sigterm");
-    //     exit(1);
-    // }
-
-    // if (sigaction(SIGQUIT, &act, 0) < 0) {
-    //     perror("Sigaction sigquit");
-    //     exit(1);
-    // }
-
-    // if (sigaction(SIGINT, &act, 0) < 0) {
-    //     perror("Sigaction sigint");
-    //     exit(1);
-    // }
 
     // 옵션 확인
     bool redirection_flag = false, interactive_mode = false;
@@ -357,10 +389,14 @@ int main(int argc, char *argv[]) {
                 interactive_buf[strlen(interactive_buf) - 1] = ' ';
                 add_eof(interactive_buf, strlen(interactive_buf));
 
+                char err_buf[MSGSIZE] = {0};
+                bool check_err_response[TOTAL_NODE] = {true, true, true, true};
+
                 for (int i = 0; i < input_node_num; i++) {
                     for (int node = 0; node < TOTAL_NODE; node++) {
                         if (!strcmp(input_node[i], node_name[node])) {
                             check_response[node] = false;
+                            check_err_response[i] = false;
                             write(fd_to_child[node][1], interactive_buf,
                                   strlen(interactive_buf));
                             break;
@@ -373,40 +409,66 @@ int main(int argc, char *argv[]) {
                 memset(interactive_buf, 0, MSGSIZE);
                 while (1) {
                     for (int node = 0; node < TOTAL_NODE; node++) {
-                        if (check_response[node])
-                            continue;
+                        if (!check_response[node]) {
+                            switch (n = read(fd_to_parent[node][0],
+                                             interactive_buf, MSGSIZE)) {
+                            case -1:
+                                if (errno == EINTR || errno == EAGAIN) {
+                                    break;
+                                } else {
+                                    perror("Read");
+                                    exit(1);
+                                }
 
-                        switch (n = read(fd_to_parent[node][0], interactive_buf,
-                                         MSGSIZE)) {
-                        case -1:
-                            if (errno == EINTR || errno == EAGAIN) {
-                                sleep(1);
+                            case 0:
+                                check_err_response[node] = true;
+                                check_response[node] = true;
                                 break;
-                            } else {
-                                perror("Read");
-                                exit(1);
+
+                            default:
+                                char *eof_address;
+                                if ((eof_address = strstr(interactive_buf,
+                                                          "eof\n")) != NULL)
+                                    memset(eof_address, 0, 5);
+
+                                printf("%s's Output: \n%s", node_name[node],
+                                       interactive_buf);
+
+                                memset(interactive_buf, 0, n);
+                                check_err_response[node] = true;
+                                check_response[node] = true;
+                                break;
                             }
+                        }
 
-                        case 0:
-                            check_response[node] = true;
-                            break;
-
-                        default:
-                            char *eof_address;
-                            if ((eof_address =
-                                     strstr(interactive_buf, "eof\n")) != NULL)
-                                memset(eof_address, 0, 5);
-
-                            printf("%s's Output: \n%s \n", node_name[node],
-                                   interactive_buf);
-
-                            memset(interactive_buf, 0, n);
-                            check_response[node] = true;
-                            break;
+                        if (!check_err_response[node]) {
+                            int err_n;
+                            switch (err_n = read(fd_to_err[node][0], err_buf,
+                                                 MSGSIZE)) {
+                            case -1:
+                                if (errno == EINTR || errno == EAGAIN) {
+                                    break;
+                                } else {
+                                    perror("Err Read");
+                                    exit(1);
+                                }
+                            case 0:
+                                check_response[node] = true;
+                                check_err_response[node] = true;
+                                break;
+                            default:
+                                printf("%s's Err: \n%s\n", node_name[node],
+                                       err_buf);
+                                memset(err_buf, 0, err_n);
+                                check_err_response[node] = true;
+                                check_response[node] = true;
+                                break;
+                            }
                         }
                     }
 
-                    if (decide_flag(check_response))
+                    if (decide_flag(check_response) &&
+                        decide_flag(check_err_response))
                         break;
                 }
 
@@ -444,7 +506,7 @@ int main(int argc, char *argv[]) {
                             break;
 
                         default:
-                            printf("%s: \n%s", node_name[node],
+                            printf("%s: \n%s\n", node_name[node],
                                    interactive_buf);
                             memset(interactive_buf, 0, n);
 
@@ -512,7 +574,6 @@ int main(int argc, char *argv[]) {
                 switch (n = read(fd_to_parent[node][0], buf, MSGSIZE)) {
                 case -1:
                     if (errno == EINTR || errno == EAGAIN) {
-                        sleep(1);
                         break;
                     } else {
                         perror("Read");
@@ -520,6 +581,7 @@ int main(int argc, char *argv[]) {
                     }
 
                 case 0:
+                    printf("%s's Output : 출력문 없음\n\n", node_name[node]);
                     check_response[node] = true;
                     break;
 
@@ -540,7 +602,7 @@ int main(int argc, char *argv[]) {
                         write(out_fd, buf, n);
                         close(out_fd);
                     } else
-                        printf("%s's Output: \n%s", node_name[node], buf);
+                        printf("%s's Output: \n%s\n", node_name[node], buf);
 
                     memset(buf, 0, n);
                     check_response[node] = true;
@@ -549,7 +611,6 @@ int main(int argc, char *argv[]) {
             }
 
             if (!check_err_response[node]) {
-
                 switch (err_n = read(fd_to_err[node][0], err_buf, MSGSIZE)) {
                 case -1:
                     if (errno == EINTR || errno == EAGAIN) {
@@ -577,23 +638,16 @@ int main(int argc, char *argv[]) {
                         write(err_fd, err_buf, err_n);
                         close(err_fd);
                     } else {
-                        printf("%s's Err: \n%s", node_name[node], err_buf);
+                        printf("%s's Err: \n%s\n", node_name[node], err_buf);
                         memset(err_buf, 0, err_n);
-                        break;
                     }
                     check_err_response[node] = true;
+                    break;
                 }
             }
         }
 
-        bool total_flag = true;
-        for (int i = 0; i < TOTAL_NODE; i++) {
-            if (!check_response[i] || !check_err_response[i]) {
-                total_flag = false;
-                break;
-            }
-        }
-        if (total_flag)
+        if (decide_flag(check_response) && decide_flag(check_err_response))
             break;
     }
 
