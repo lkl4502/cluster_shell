@@ -268,6 +268,7 @@ int main(int argc, char *argv[]) {
         char *val;
         char explanation[MSGSIZE] = {0};
         int hostfile_fd;
+
         if ((val = getenv("CLSH_HOSTS")) != NULL) { // CLSH_HOSTS 환경변수
             input_node_num = split(val, input_node, ":");
             command_len = extract_command(argv, command, start + 1, argc);
@@ -312,14 +313,104 @@ int main(int argc, char *argv[]) {
         printf("%s", explanation);
     }
 
+    char interactive_buf[MSGSIZE] = {0};
+    bool check_response[TOTAL_NODE] = {true, true, true, true};
+
     if (interactive_mode) {
         if (command_len == 0) { // 내부 쉘 동작
+            printf("Enter 'quit' to leave this interactive mode\n");
+            printf("Working with nodes : ");
+            for (int i = 0; i < input_node_num; i++)
+                if (i == input_node_num - 1)
+                    printf("%s\n", input_node[i]);
+                else
+                    printf("%s, ", input_node[i]);
+
+            ssh_connect("", check_response);
+
+            while (1) { // 명령어 입력
+                printf("clsh> ");
+                fgets(interactive_buf, MSGSIZE, stdin);
+
+                if (!strcmp(interactive_buf, "quit\n")) { // 종료
+                    printf("Interactive Mode Exit\n");
+                    break;
+                }
+
+                if (interactive_buf[0] == '!') { // 로컬 실행
+                    fprintf(stderr, "LOCAL : ");
+
+                    int res = system(interactive_buf + 1);
+                    if (res == -1) {
+                        perror("System");
+                        exit(1);
+                    }
+                    continue;
+                }
+
+                interactive_buf[strlen(interactive_buf) - 1] = ' ';
+                add_eof(interactive_buf, strlen(interactive_buf));
+
+                for (int i = 0; i < input_node_num; i++) {
+                    for (int node = 0; node < TOTAL_NODE; node++) {
+                        if (!strcmp(input_node[i], node_name[node])) {
+                            check_response[node] = false;
+                            write(fd_to_child[node][1], interactive_buf,
+                                  strlen(interactive_buf));
+                            break;
+                        }
+                    }
+                }
+
+                printf("-------------------\n");
+
+                memset(interactive_buf, 0, MSGSIZE);
+                while (1) {
+                    for (int node = 0; node < TOTAL_NODE; node++) {
+                        if (check_response[node])
+                            continue;
+
+                        switch (n = read(fd_to_parent[node][0], interactive_buf,
+                                         MSGSIZE)) {
+                        case -1:
+                            if (errno == EINTR || errno == EAGAIN) {
+                                sleep(1);
+                                break;
+                            } else {
+                                perror("Read");
+                                exit(1);
+                            }
+
+                        case 0:
+                            check_response[node] = true;
+                            break;
+
+                        default:
+                            char *eof_address;
+                            if ((eof_address =
+                                     strstr(interactive_buf, "eof\n")) != NULL)
+                                memset(eof_address, 0, 5);
+
+                            printf("%s's Output: \n%s \n", node_name[node],
+                                   interactive_buf);
+
+                            memset(interactive_buf, 0, n);
+                            check_response[node] = true;
+                            break;
+                        }
+                    }
+
+                    if (decide_flag(check_response))
+                        break;
+                }
+
+                printf("-------------------\n");
+            }
+            return 0;
 
         } else { // -i 옵션
-            bool check_response[TOTAL_NODE] = {true, true, true, true};
             command_len = add_eof(command, command_len);
             ssh_connect(command, check_response);
-            char interactive_buf[MSGSIZE] = {0};
 
             while (1) {
                 bool tmp_response[TOTAL_NODE] = {true, true, true, true};
@@ -368,7 +459,6 @@ int main(int argc, char *argv[]) {
                     }
 
                     if (decide_flag(tmp_response)) {
-
                         break;
                     }
                 }
@@ -378,104 +468,6 @@ int main(int argc, char *argv[]) {
         }
         return 0;
     }
-
-    // if (!strcmp(command, "-i\n")) { // Interactive Mode 구현
-    //     printf("Enter 'quit' to leave this interactive mode\n");
-    //     printf("Working with nodes : ");
-    //     for (int i = 0; i < input_node_num; i++)
-    //         if (i == input_node_num - 1)
-    //             printf("%s\n", input_node[i]);
-    //         else
-    //             printf("%s, ", input_node[i]);
-
-    //     bool check_response[TOTAL_NODE] = {true, true, true, true};
-    //     ssh_connect("", check_response);
-
-    //     while (1) { // 명령어 입력
-    //         printf("clsh> ");
-    //         char interactive_buf[MSGSIZE] = {0};
-    //         fgets(interactive_buf, MSGSIZE, stdin);
-
-    //         if (!strcmp(interactive_buf, "quit\n")) { // 종료
-    //             printf("Interactive Mode Exit\n");
-    //             break;
-    //         }
-
-    //         if (interactive_buf[0] == '!') { // 로컬 실행
-    //             fprintf(stderr, "LOCAL : ");
-
-    //             int res = system(interactive_buf + 1);
-    //             if (res == -1) {
-    //                 perror("System");
-    //                 exit(1);
-    //             }
-    //             continue;
-    //         }
-
-    //         for (int i = 0; i < input_node_num; i++) {
-    //             for (int node = 0; node < TOTAL_NODE; node++) {
-    //                 if (!strcmp(input_node[i], node_name[node])) {
-    //                     check_response[node] = false;
-    //                     write(fd_to_child[node][1], interactive_buf,
-    //                           strlen(interactive_buf));
-    //                     break;
-    //                 }
-    //             }
-    //         }
-
-    //         printf("-------------------\n");
-
-    //         memset(interactive_buf, 0, MSGSIZE);
-    //         int sleep_cnt = 0;
-    //         while (1) {
-    //             for (int node = 0; node < TOTAL_NODE; node++) {
-    //                 if (check_response[node])
-    //                     continue;
-
-    //                 switch (n = read(fd_to_parent[node][0], interactive_buf,
-    //                                  MSGSIZE)) {
-    //                 case -1:
-    //                     if (errno == EINTR || errno == EAGAIN) {
-    //                         sleep(1);
-    //                         sleep_cnt++;
-    //                         break;
-    //                     } else {
-    //                         perror("Read");
-    //                         exit(1);
-    //                     }
-
-    //                 case 0:
-    //                     printf("%s: 출력문 없음.\n", node_name[node]);
-    //                     check_response[node] = true;
-    //                     break;
-
-    //                 default:
-    //                     printf("%s: \n%s \n", node_name[node],
-    //                     interactive_buf); memset(interactive_buf, 0, n);
-    //                     check_response[node] = true;
-    //                     break;
-    //                 }
-    //             }
-
-    //             bool flag = true;
-    //             for (int i = 0; i < TOTAL_NODE; i++)
-    //                 if (!check_response[i])
-    //                     flag = false;
-    //             if (flag)
-    //                 break;
-
-    //             if (sleep_cnt > 10) {
-    //                 for (int node = 0; node < TOTAL_NODE; node++)
-    //                     if (!check_response[node])
-    //                         printf("%s: 출력문 없음.\n", node_name[node]);
-    //                 break;
-    //             }
-    //         }
-
-    //         printf("-------------------\n");
-    //     }
-    //     return 0;
-    // }
 
     if (redirection_flag) {
         char pipe_input[MSGSIZE] = {0};
@@ -499,7 +491,6 @@ int main(int argc, char *argv[]) {
         command[command_len++] = '\n';
     }
 
-    bool check_response[TOTAL_NODE] = {true, true, true, true};
     bool check_err_response[TOTAL_NODE] = {true, true, true, true};
     ssh_connect(command, check_response);
 
