@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define MSGSIZE 1024
@@ -49,10 +50,34 @@ void sigtstp_handler(int signo) {
     exit(0);
 }
 
-void cleanup() {
-    for (int i = 0; i < TOTAL_NODE; i++) {
-        kill(pid_arr[i], SIGTERM);
+void sigchild_handler(int signum) {
+    pid_t child_pid;
+
+    while (1) {
+        if ((child_pid = waitpid(-1, 0, WNOHANG)) < 0)
+            break;
     }
+}
+
+void cleanup() {
+    signal(SIGTERM, SIG_IGN);
+    kill(getpgid(getpid()) * -1, SIGTERM);
+
+    pid_t child_pid;
+    for (int i = 0; i < TOTAL_NODE; i++) {
+        if ((child_pid = wait(NULL)) == -1)
+            break;
+        else {
+            for (int node = 0; node < TOTAL_NODE; node++) {
+                if (pid_arr[node] == child_pid) {
+                    printf("%s(%d) : Terminated.\n", node_name[node],
+                           child_pid);
+                    break;
+                }
+            }
+        }
+    }
+    printf("All processes are terminated.\n");
 }
 
 int split(char input[], char result[][MSGSIZE], const char *delimiter) {
@@ -170,6 +195,9 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
                         perror("execv");
                         exit(1);
                     }
+
+                    perror("execv call");
+                    exit(1);
                     break;
 
                 default: // parent
@@ -180,42 +208,51 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
                     setvbuf(stdin, NULL, _IOLBF, 0);
                     setvbuf(stdout, NULL, _IOLBF, 0);
 
-                    // SIGTERM -> 하던 일 하고 종료, SIGQUIT -> 바로 종료,
-                    // SIGINT
-                    struct sigaction act;
-                    sigemptyset(&act.sa_mask);
-                    act.sa_flags = 0;
-                    act.sa_handler = sigterm_handler;
-                    if (sigaction(SIGTERM, &act, 0) < 0) {
-                        perror("Sigaction sigterm");
-                        exit(1);
-                    }
-                    act.sa_handler = sigquit_handler;
-                    if (sigaction(SIGQUIT, &act, 0) < 0) {
-                        perror("Sigaction sigquit");
-                        exit(1);
-                    }
-                    act.sa_handler = sigint_handler;
-                    if (sigaction(SIGINT, &act, 0) < 0) {
-                        perror("Sigaction sigint");
-                        exit(1);
-                    }
-
-                    act.sa_handler = sigtstp_handler;
-                    if (sigaction(SIGTSTP, &act, 0) < 0) {
-                        perror("Sigaction sigtstp");
-                        exit(1);
-                    }
-
-                    if (atexit(cleanup) == -1) {
-                        perror("atexit");
-                        exit(1);
-                    }
+                    // child.sa_flags = SA_NOCLDSTOP;
+                    // child.sa_handler = sigchild_handler;
+                    // if (sigaction(SIGCHLD, &child, 0) < 0) {
+                    //     perror("Sigaction child");
+                    //     exit(1);
+                    // }
                     break;
                 }
                 break;
             }
         }
+    }
+    // SIGTERM -> 하던 일 하고 종료, SIGQUIT -> 바로 종료,
+    // SIGINT
+    struct sigaction act, child;
+
+    sigemptyset(&act.sa_mask);
+    sigemptyset(&child.sa_mask);
+
+    act.sa_flags = 0;
+    act.sa_handler = sigterm_handler;
+    if (sigaction(SIGTERM, &act, 0) < 0) {
+        perror("Sigaction sigterm");
+        exit(1);
+    }
+    act.sa_handler = sigquit_handler;
+    if (sigaction(SIGQUIT, &act, 0) < 0) {
+        perror("Sigaction sigquit");
+        exit(1);
+    }
+    act.sa_handler = sigint_handler;
+    if (sigaction(SIGINT, &act, 0) < 0) {
+        perror("Sigaction sigint");
+        exit(1);
+    }
+
+    act.sa_handler = sigtstp_handler;
+    if (sigaction(SIGTSTP, &act, 0) < 0) {
+        perror("Sigaction sigtstp");
+        exit(1);
+    }
+
+    if (atexit(cleanup) == -1) {
+        perror("atexit");
+        exit(1);
     }
 }
 
