@@ -407,6 +407,7 @@ int main(int argc, char *argv[]) {
                 printf("-------------------\n");
 
                 memset(interactive_buf, 0, MSGSIZE);
+                int sleep_cnt = 0;
                 while (1) {
                     for (int node = 0; node < TOTAL_NODE; node++) {
                         if (!check_response[node]) {
@@ -414,6 +415,13 @@ int main(int argc, char *argv[]) {
                                              interactive_buf, MSGSIZE)) {
                             case -1:
                                 if (errno == EINTR || errno == EAGAIN) {
+                                    usleep(500000);
+                                    sleep_cnt++;
+                                    if (sleep_cnt > 6) {
+                                        printf("%s's Output: \n\n",
+                                               node_name[node]);
+                                        check_response[node] = true;
+                                    }
                                     break;
                                 } else {
                                     perror("Read");
@@ -421,7 +429,6 @@ int main(int argc, char *argv[]) {
                                 }
 
                             case 0:
-                                check_err_response[node] = true;
                                 check_response[node] = true;
                                 break;
 
@@ -431,11 +438,10 @@ int main(int argc, char *argv[]) {
                                                           "eof\n")) != NULL)
                                     memset(eof_address, 0, 5);
 
-                                printf("%s's Output: \n%s", node_name[node],
+                                printf("%s's Output: \n%s\n", node_name[node],
                                        interactive_buf);
 
                                 memset(interactive_buf, 0, n);
-                                check_err_response[node] = true;
                                 check_response[node] = true;
                                 break;
                             }
@@ -447,13 +453,16 @@ int main(int argc, char *argv[]) {
                                                  MSGSIZE)) {
                             case -1:
                                 if (errno == EINTR || errno == EAGAIN) {
+                                    usleep(500000);
+                                    sleep_cnt++;
+                                    if (sleep_cnt > 7)
+                                        check_err_response[node] = true;
                                     break;
                                 } else {
                                     perror("Err Read");
                                     exit(1);
                                 }
                             case 0:
-                                check_response[node] = true;
                                 check_err_response[node] = true;
                                 break;
                             default:
@@ -461,7 +470,6 @@ int main(int argc, char *argv[]) {
                                        err_buf);
                                 memset(err_buf, 0, err_n);
                                 check_err_response[node] = true;
-                                check_response[node] = true;
                                 break;
                             }
                         }
@@ -486,6 +494,7 @@ int main(int argc, char *argv[]) {
                     if (!check_response[i])
                         tmp_response[i] = false;
                 }
+
                 while (1) {
                     for (int node = 0; node < TOTAL_NODE; node++) {
                         if (tmp_response[node] || check_response[node])
@@ -524,6 +533,8 @@ int main(int argc, char *argv[]) {
                             memset(interactive_buf, 0, strlen(interactive_buf));
                             break;
                         }
+                        if (n == 0)
+                            return 0;
                     }
 
                     if (decide_flag(tmp_response)) {
@@ -581,7 +592,7 @@ int main(int argc, char *argv[]) {
                     }
 
                 case 0:
-                    printf("%s's Output : 출력문 없음\n\n", node_name[node]);
+                    printf("%s's Output : \n\n", node_name[node]);
                     check_response[node] = true;
                     break;
 
