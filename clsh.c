@@ -22,46 +22,9 @@ int fd_to_err[TOTAL_NODE][2];
 char input_node[MAXWORD][MSGSIZE] = {0};
 int input_node_num;
 
-// 정상 종료
-void sigterm_handler(int signo) {
-    printf("TERM\n");
-    exit(0);
-}
-
-// ctrl + c
-void sigint_handler(int signo) {
-    printf("INT\n");
-    exit(0);
-}
-
-// ctrl + ;
-void sigquit_handler(int signo) {
-    printf("QUIT\n");
-    if (signo == SIGQUIT)
-        for (int node = 0; node < TOTAL_NODE; node++)
-            kill(pid_arr[node], SIGQUIT);
-
-    exit(0);
-}
-
-// ctrl + z
-void sigtstp_handler(int signo) {
-    printf("TSTP\n");
-    exit(0);
-}
-
-void sigchild_handler(int signum) {
-    pid_t child_pid;
-
-    while (1) {
-        if ((child_pid = waitpid(-1, 0, WNOHANG)) < 0)
-            break;
-    }
-}
-
-void cleanup() {
-    signal(SIGTERM, SIG_IGN);
-    kill(getpgid(getpid()) * -1, SIGTERM);
+void cleanup(int signo) {
+    signal(signo, SIG_IGN);
+    kill(getpgid(getpid()) * -1, signo);
 
     pid_t child_pid;
     for (int i = 0; i < TOTAL_NODE; i++) {
@@ -78,6 +41,21 @@ void cleanup() {
         }
     }
     printf("All processes are terminated.\n");
+}
+
+void exit_signal_handler(int signo) {
+    psignal(signo, "Signal ");
+    cleanup(signo);
+    exit(0);
+}
+
+void sigchild_handler(int signum) {
+    pid_t child_pid;
+
+    while (1) {
+        if ((child_pid = waitpid(-1, 0, WNOHANG)) < 0)
+            break;
+    }
 }
 
 int split(char input[], char result[][MSGSIZE], const char *delimiter) {
@@ -228,30 +206,24 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
     sigemptyset(&child.sa_mask);
 
     act.sa_flags = 0;
-    act.sa_handler = sigterm_handler;
-    if (sigaction(SIGTERM, &act, 0) < 0) {
-        perror("Sigaction sigterm");
-        exit(1);
-    }
-    act.sa_handler = sigquit_handler;
-    if (sigaction(SIGQUIT, &act, 0) < 0) {
-        perror("Sigaction sigquit");
-        exit(1);
-    }
-    act.sa_handler = sigint_handler;
-    if (sigaction(SIGINT, &act, 0) < 0) {
-        perror("Sigaction sigint");
+    act.sa_handler = exit_signal_handler;
+    if (sigaction(SIGTERM, &act, 0) < 0) { // 정상종료
+        perror("Sigaction SIGTERM");
         exit(1);
     }
 
-    act.sa_handler = sigtstp_handler;
-    if (sigaction(SIGTSTP, &act, 0) < 0) {
-        perror("Sigaction sigtstp");
+    if (sigaction(SIGQUIT, &act, 0) < 0) { // ctrl+\.
+        perror("Sigaction SIGQUIT");
         exit(1);
     }
 
-    if (atexit(cleanup) == -1) {
-        perror("atexit");
+    if (sigaction(SIGINT, &act, 0) < 0) { // ctrl + c
+        perror("Sigaction SIGINT");
+        exit(1);
+    }
+
+    if (sigaction(SIGTSTP, &act, 0) < 0) { // ctrl + z
+        perror("Sigaction SIGTSTP");
         exit(1);
     }
 }
