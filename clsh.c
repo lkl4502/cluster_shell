@@ -298,10 +298,16 @@ int main(int argc, char *argv[]) {
         }
         if (strstr(argv[i], "--out=") != NULL) {
             out_file = strstr(argv[i], "--out=") + strlen("--out=");
+            if (out_file[0] != '/') {
+                out_file = strcat(realpath(out_file, NULL), "/");
+            }
             continue;
         }
         if (strstr(argv[i], "--err=") != NULL) {
             err_file = strstr(argv[i], "--err=") + strlen("--err=");
+            if (err_file[0] != '/') {
+                err_file = strcat(realpath(err_file, NULL), "/");
+            }
             continue;
         }
 
