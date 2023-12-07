@@ -301,7 +301,6 @@ int main(int argc, char *argv[]) {
             if (out_file[0] != '/') {
                 out_file = strcat(realpath(out_file, NULL), "/");
             }
-            printf("%s\n", out_file);
             continue;
         }
         if (strstr(argv[i], "--err=") != NULL) {
@@ -309,7 +308,6 @@ int main(int argc, char *argv[]) {
             if (err_file[0] != '/') {
                 err_file = strcat(realpath(err_file, NULL), "/");
             }
-            printf("%s\n", out_file);
             continue;
         }
 
