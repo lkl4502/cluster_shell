@@ -724,6 +724,7 @@ int main(int argc, char *argv[]) {
         if (decide_flag(check_response) && decide_flag(check_err_response))
             break;
     }
-
+    if (input_node_num != terminate_cnt)
+        pause();
     return 0;
 }
