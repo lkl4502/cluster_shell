@@ -21,11 +21,16 @@ int fd_to_err[TOTAL_NODE][2];
 
 char input_node[MAXWORD][MSGSIZE] = {0};
 int input_node_num;
+bool process_terminated = false;
+bool redirection_flag = false;
+bool interactive_mode = false;
 
-void cleanup(int eventnum, void *signo) {
+void signal_to_child(int eventnum, void *signo) {
     signal(*(int *)signo, SIG_IGN);
     kill(getpgid(getpid()) * -1, *(int *)signo);
+}
 
+void wait_all_child() {
     pid_t child_pid;
     for (int i = 0; i < TOTAL_NODE; i++) {
         if ((child_pid = wait(NULL)) == -1)
@@ -44,25 +49,47 @@ void cleanup(int eventnum, void *signo) {
 }
 
 void term_signal_handler(int signo) {
+    process_terminated = true;
     psignal(signo, "Signal ");
-    if (on_exit(cleanup, &signo) == -1) {
-        perror("on_exit");
+    if (atexit(wait_all_child) == -1) {
+        perror("atexit call");
+        exit(1);
+    }
+
+    if (on_exit(signal_to_child, &signo) == -1) {
+        perror("on_exit call");
         exit(1);
     }
 }
 
 void exit_signal_handler(int signo) {
+    process_terminated = true;
     psignal(signo, "Signal ");
-    cleanup(0, &signo);
+    signal_to_child(0, &signo);
+    wait_all_child();
     exit(0);
 }
 
-void sigchild_handler(int signum) {
-    pid_t child_pid;
+void sigchild_handler(int signo) {
+    if (process_terminated)
+        return;
+    // 먼저 종료된 자식의 pid와 종료 상태
+    int status, i;
+    pid_t child_pid = wait(&status);
 
-    while (1) {
-        if ((child_pid = waitpid(-1, 0, WNOHANG)) < 0)
+    for (i = 0; i < TOTAL_NODE; i++)
+        if (pid_arr[i] == child_pid)
             break;
+
+    if (!WIFEXITED(status)) {
+        printf("ERROR : %s connection lost\n", node_name[i]);
+        signal_to_child(0, (void *)SIGTERM);
+        wait_all_child();
+        exit(0);
+    } else {
+        printf("%s(%d) : Terminated.\n", node_name[i], child_pid);
+        wait_all_child();
+        exit(1);
     }
 }
 
@@ -177,6 +204,7 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
                                         "ubuntu",
                                         command,
                                         NULL};
+
                     if (execv("/bin/sshpass", ssh_argv) == -1) {
                         perror("execv");
                         exit(1);
@@ -230,6 +258,7 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
     }
 
     // child.sa_flags = SA_NOCLDSTOP;
+    // sigfillset(&child.sa_mask);
     // child.sa_handler = sigchild_handler;
     // if (sigaction(SIGCHLD, &child, 0) < 0) {
     //     perror("Sigaction child");
@@ -250,7 +279,6 @@ int main(int argc, char *argv[]) {
     }
 
     // 옵션 확인
-    bool redirection_flag = false, interactive_mode = false;
     char *out_file = NULL;
     char *err_file = NULL;
 
@@ -350,11 +378,11 @@ int main(int argc, char *argv[]) {
             }
 
             close(hostfile_fd);
-
+            val = ".hostfile";
             input_node_num = split(buf, input_node, "\n");
             memset(buf, 0, sizeof(buf));
             command_len = extract_command(argv, command, start + 1, argc);
-            sprintf(val, "Note: use hostfile \'%s\' (default)\n", val);
+            sprintf(explanation, "Note: use hostfile \'%s\' (default)\n", val);
         } else { // 모두 없을 때
             sprintf(explanation, "--hostfile 옵션이 제공되지 않았습니다.\n");
             printf("%s", explanation);
@@ -589,6 +617,7 @@ int main(int argc, char *argv[]) {
     }
 
     bool check_err_response[TOTAL_NODE] = {true, true, true, true};
+    command_len = (command, command_len);
     ssh_connect(command, check_response);
 
     for (int i = 0; i < TOTAL_NODE; i++)
@@ -610,11 +639,13 @@ int main(int argc, char *argv[]) {
                     }
 
                 case 0:
-                    printf("%s's Output : \n\n", node_name[node]);
                     check_response[node] = true;
                     break;
 
                 default:
+                    char *eof_address;
+                    if ((eof_address = strstr(buf, "eof\n")) != NULL)
+                        memset(eof_address, 0, 5);
                     if (out_file != NULL) {
                         char file_name[MSGSIZE] = {0};
 

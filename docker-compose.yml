@@ -5,9 +5,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
-      CLSH_HOSTS: node1:node2:node3:node4
-      CLSH_HOSTFILE: clsuterfile
     container_name: host
     volumes:
       - .:/build
