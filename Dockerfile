@@ -22,7 +22,8 @@ telnet dnsutils \
 && apt install /tmp/dumb-init_1.2.5_arm64.deb \
 && mkdir /var/run/sshd \
 && apt clean \
-&& rm -rf /var/lib/apt/lists* /tmp/* /var/tmp*
+&& rm -rf /var/lib/apt/lists* /tmp/* /var/tmp* \
+&& mkdir /tmp/run /tmp/run/error
 
 USER root
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' \

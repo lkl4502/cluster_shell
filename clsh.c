@@ -13,6 +13,9 @@
 #define TOTAL_NODE 4
 
 pid_t pid_arr[TOTAL_NODE];
+int terminate_order[TOTAL_NODE];
+int terminate_cnt = 0;
+
 char *node_name[TOTAL_NODE] = {"node1", "node2", "node3", "node4"};
 
 int fd_to_child[TOTAL_NODE][2];
@@ -82,14 +85,20 @@ void sigchild_handler(int signo) {
             break;
 
     if (!WIFEXITED(status)) {
+        signo = SIGTERM;
         printf("ERROR : %s connection lost\n", node_name[i]);
-        signal_to_child(0, (void *)SIGTERM);
+        signal_to_child(0, &signo);
         wait_all_child();
         exit(0);
     } else {
-        printf("%s(%d) : Terminated.\n", node_name[i], child_pid);
-        wait_all_child();
-        exit(1);
+        terminate_order[terminate_cnt++] = i;
+    }
+
+    if (terminate_cnt == input_node_num) {
+        for (i = 0; i < input_node_num; i++)
+            printf("%s(%d) : Terminated.\n", node_name[terminate_order[i]],
+                   pid_arr[terminate_order[i]]);
+        printf("All processes are terminated.\n");
     }
 }
 
@@ -257,13 +266,13 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
         exit(1);
     }
 
-    // child.sa_flags = SA_NOCLDSTOP;
-    // sigfillset(&child.sa_mask);
-    // child.sa_handler = sigchild_handler;
-    // if (sigaction(SIGCHLD, &child, 0) < 0) {
-    //     perror("Sigaction child");
-    //     exit(1);
-    // }
+    child.sa_flags = SA_NOCLDSTOP;
+    sigfillset(&child.sa_mask);
+    child.sa_handler = sigchild_handler;
+    if (sigaction(SIGCHLD, &child, 0) < 0) {
+        perror("Sigaction child");
+        exit(1);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -579,8 +588,6 @@ int main(int argc, char *argv[]) {
                             memset(interactive_buf, 0, strlen(interactive_buf));
                             break;
                         }
-                        if (n == 0)
-                            return 0;
                     }
 
                     if (decide_flag(tmp_response)) {
@@ -617,7 +624,7 @@ int main(int argc, char *argv[]) {
     }
 
     bool check_err_response[TOTAL_NODE] = {true, true, true, true};
-    command_len = (command, command_len);
+    command_len = add_eof(command, command_len);
     ssh_connect(command, check_response);
 
     for (int i = 0; i < TOTAL_NODE; i++)
@@ -644,8 +651,9 @@ int main(int argc, char *argv[]) {
 
                 default:
                     char *eof_address;
-                    if ((eof_address = strstr(buf, "eof\n")) != NULL)
+                    if ((eof_address = strstr(buf, "eof\n")) != NULL) {
                         memset(eof_address, 0, 5);
+                    }
                     if (out_file != NULL) {
                         char file_name[MSGSIZE] = {0};
 
