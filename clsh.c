@@ -301,6 +301,7 @@ int main(int argc, char *argv[]) {
             if (out_file[0] != '/') {
                 out_file = strcat(realpath(out_file, NULL), "/");
             }
+            printf("%s\n", out_file);
             continue;
         }
         if (strstr(argv[i], "--err=") != NULL) {
@@ -308,6 +309,7 @@ int main(int argc, char *argv[]) {
             if (err_file[0] != '/') {
                 err_file = strcat(realpath(err_file, NULL), "/");
             }
+            printf("%s\n", out_file);
             continue;
         }
 
@@ -431,19 +433,32 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (interactive_buf[0] == '!') { // 로컬 실행
+                    printf("-------------------\n");
                     fprintf(stderr, "LOCAL : \n");
                     int res;
                     if (!strncmp(interactive_buf + 1, "cd", 2)) {
                         interactive_buf[strlen(interactive_buf) - 1] = '\0';
                         char *path = realpath(interactive_buf + 4, NULL);
                         res = chdir(path);
-                    } else
+                    } else {
+                        struct sigaction child, old;
+                        sigemptyset(&child.sa_mask);
+                        child.sa_flags = 0;
+                        if (sigaction(SIGCHLD, &child, &old) < 0) {
+                            perror("Sigaction child");
+                            exit(1);
+                        }
                         res = system(interactive_buf + 1);
-
+                        if (sigaction(SIGCHLD, &old, 0) < 0) {
+                            perror("Sigaction child");
+                            exit(1);
+                        }
+                    }
                     if (res == -1) {
                         perror("System");
                         exit(1);
                     }
+                    printf("-------------------\n");
                     continue;
                 }
 
@@ -626,7 +641,7 @@ int main(int argc, char *argv[]) {
 
         for (int i = 0; i < idx; i++)
             command[command_len++] = pipe_input[i];
-        command[command_len++] = '\n';
+        command[command_len++] = ' ';
     }
 
     bool check_err_response[TOTAL_NODE] = {true, true, true, true};
