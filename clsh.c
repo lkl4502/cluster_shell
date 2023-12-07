@@ -22,9 +22,9 @@ int fd_to_err[TOTAL_NODE][2];
 char input_node[MAXWORD][MSGSIZE] = {0};
 int input_node_num;
 
-void cleanup(int signo) {
-    signal(signo, SIG_IGN);
-    kill(getpgid(getpid()) * -1, signo);
+void cleanup(int eventnum, void *signo) {
+    signal(*(int *)signo, SIG_IGN);
+    kill(getpgid(getpid()) * -1, *(int *)signo);
 
     pid_t child_pid;
     for (int i = 0; i < TOTAL_NODE; i++) {
@@ -43,9 +43,17 @@ void cleanup(int signo) {
     printf("All processes are terminated.\n");
 }
 
+void term_signal_handler(int signo) {
+    psignal(signo, "Signal ");
+    if (on_exit(cleanup, &signo) == -1) {
+        perror("on_exit");
+        exit(1);
+    }
+}
+
 void exit_signal_handler(int signo) {
     psignal(signo, "Signal ");
-    cleanup(signo);
+    cleanup(0, &signo);
     exit(0);
 }
 
@@ -185,13 +193,6 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
 
                     setvbuf(stdin, NULL, _IOLBF, 0);
                     setvbuf(stdout, NULL, _IOLBF, 0);
-
-                    // child.sa_flags = SA_NOCLDSTOP;
-                    // child.sa_handler = sigchild_handler;
-                    // if (sigaction(SIGCHLD, &child, 0) < 0) {
-                    //     perror("Sigaction child");
-                    //     exit(1);
-                    // }
                     break;
                 }
                 break;
@@ -206,12 +207,13 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
     sigemptyset(&child.sa_mask);
 
     act.sa_flags = 0;
-    act.sa_handler = exit_signal_handler;
+    act.sa_handler = term_signal_handler;
     if (sigaction(SIGTERM, &act, 0) < 0) { // 정상종료
         perror("Sigaction SIGTERM");
         exit(1);
     }
 
+    act.sa_handler = exit_signal_handler;
     if (sigaction(SIGQUIT, &act, 0) < 0) { // ctrl+\.
         perror("Sigaction SIGQUIT");
         exit(1);
@@ -226,6 +228,13 @@ bool ssh_connect(char *command, bool check_response[TOTAL_NODE]) {
         perror("Sigaction SIGTSTP");
         exit(1);
     }
+
+    // child.sa_flags = SA_NOCLDSTOP;
+    // child.sa_handler = sigchild_handler;
+    // if (sigaction(SIGCHLD, &child, 0) < 0) {
+    //     perror("Sigaction child");
+    //     exit(1);
+    // }
 }
 
 int main(int argc, char *argv[]) {
